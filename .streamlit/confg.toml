@@ -1,0 +1,6 @@
+[server]
+port = 7860
+headless = true
+
+[client]
+showErrorDetails = false
