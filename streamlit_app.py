@@ -1,8 +1,20 @@
 import streamlit as st
-import pandas as pd
-import yfinance as yf
-from datetime import datetime
-import io
+
+# Skip complex imports for now
+st.set_page_config(page_title="Crisis Detection", page_icon="🚨", layout="wide")
+
+st.title("🚨 Financial Crisis Detection")
+st.write("App deployed successfully!")
+
+# Try imports
+try:
+    import pandas as pd
+    import yfinance as yf
+    from datetime import datetime
+    import io
+    st.success("✓ All imports working!")
+except Exception as e:
+    st.error(f"Import error: {e}")
 
 st.set_page_config(page_title="Crisis Detection", page_icon="$", layout="wide")
 
