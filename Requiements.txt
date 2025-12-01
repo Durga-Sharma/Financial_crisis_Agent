@@ -2,3 +2,6 @@ streamlit
 pandas
 yfinance
 google-generativeai
+lxml==4.9.3
+requests==2.31.0
+beautifulsoup4==4.12.2
