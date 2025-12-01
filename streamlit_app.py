@@ -1,200 +1,282 @@
 import streamlit as st
-import subprocess
-import sys
+import pandas as pd
+import numpy as np
+
+# Direct import - NO subprocess
 try:
     import yfinance as yf
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance"])
-    import yfinance as yf
-
-# Skipping complex imports for now
-st.set_page_config(page_title="Crisis Detection", page_icon="🚨", layout="wide")
-
-st.title("🚨 Financial Crisis Detection")
-st.write("App deployed successfully!")
-
-# Try imports
-try:
-    import pandas as pd
-    
-    from datetime import datetime
-    import io
-    st.success("✓ All imports working!")
-except Exception as e:
-    st.error(f"Import error: {e}")
-
-st.set_page_config(page_title="Crisis Detection", page_icon="$", layout="wide")
-
-# ===== FUNCTIONS =====
-def fetch_market_data(symbol: str) -> dict:
+    st.error("yfinance not installed. Check requirements.txt")
+    st.stop()
+#page configuration
+st.set_page_config(
+    page_title="🚨 Financial Crisis Detection",
+    page_icon="🚨",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+#functions
+@st.cache_data
+def fetch_market_data(symbol: str, period: str = "30d") -> dict:
+    """Fetch market data from Yahoo Finance"""
     try:
-        data = yf.download(symbol, period="30d", progress=False, auto_adjust=False)
-        if data.empty:
-            return {"error": f"No data for {symbol}"}
-        current_price = float(data['Close'].iloc[-1])
-        prev_price = float(data['Close'].iloc[0])
-        price_change_pct = ((current_price - prev_price) / prev_price) * 100
-        returns = data['Close'].pct_change()
-        volatility = float(returns.std() * 100)
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period=period)
+        
+        if hist.empty:
+            return {"error": f"No data found for symbol: {symbol}"}
+        
+        # Calculate metrics
+        returns = hist['Close'].pct_change()
+        volatility = returns.std() * np.sqrt(252) * 100  # Annualized
+        
+        current_price = hist['Close'].iloc[-1]
+        price_change_30d = ((hist['Close'].iloc[-1] / hist['Close'].iloc[0]) - 1) * 100
+        
         return {
             "symbol": symbol,
             "current_price": round(current_price, 2),
-            "price_change_percent": round(price_change_pct, 2),
-            "volatility_percent": round(volatility, 2)
+            "price_change_percent": round(price_change_30d, 2),
+            "volatility_percent": round(volatility, 2),
+            "volume": int(hist['Volume'].iloc[-1]),
+            "data": hist,
+            "returns": returns
         }
-    except:
-        return {"error": "Failed", "symbol": symbol}
+    except Exception as e:
+        return {"error": str(e)}
+
 
 def detect_crisis_signals(market_data: dict) -> dict:
+    """Detect crisis signals from market data"""
+    if "error" in market_data:
+        return {"error": market_data["error"]}
+    
     signals = []
-    if market_data.get("volatility_percent", 0) > 20:
-        signals.append("High Volatility")
-    if market_data.get("price_change_percent", 0) < -5:
-        signals.append("Sharp Decline")
-    if market_data.get("price_change_percent", 0) < -2:
-        signals.append("Negative Momentum")
+    # Signal 1: High Volatility (>20%)
+    if market_data['volatility_percent'] > 20:
+        signals.append("🔴 High Volatility (>20%)")
+    
+    # Signal 2: Sharp Decline (>5% in 30 days)
+    if market_data['price_change_percent'] < -5:
+        signals.append("🔴 Sharp Decline (>5%)")
+    
+    # Signal 3: Negative Momentum
+    if market_data['price_change_percent'] < -2:
+        signals.append("🟠 Negative Momentum (<-2%)")
+    
     return {
-        "detected_signals": signals,
-        "signal_count": len(signals),
-        "crisis_probability": len(signals) * 30
+        "signals": signals,
+        "signal_count": len(signals)
+    }
+def calculate_risk_score(signal_count: int) -> dict:
+    """Calculate risk score and classification"""
+    risk_score = min(signal_count * 25, 100)
+    
+    if risk_score < 30:
+        classification = "🟢 LOW"
+        recommendation = "Continue monitoring"
+    elif risk_score < 50:
+        classification = "🟡 MODERATE"
+        recommendation = "Pay attention"
+    elif risk_score < 70:
+        classification = "🟠 HIGH"
+        recommendation = "Consider action"
+    else:
+        classification = "🔴 CRITICAL"
+        recommendation = "Review urgently"
+    
+    return {
+        "risk_score": risk_score,
+        "classification": classification,
+        "recommendation": recommendation
     }
 
-def calculate_risk_score(signal_count: int) -> dict:
-    risk_score = min(signal_count * 25, 100)
-    if risk_score < 30:
-        risk_level, rec = "LOW", "Continue monitoring"
-    elif risk_score < 50:
-        risk_level, rec = "MODERATE", "Pay attention"
-    elif risk_score < 70:
-        risk_level, rec = "HIGH", "Consider action"
-    else:
-        risk_level, rec = "CRITICAL", "Review urgently"
-    return {"risk_score": int(risk_score), "risk_level": risk_level, "recommendation": rec}
 
 def analyze_portfolio(symbols: list) -> dict:
+    """Analyze portfolio risk across multiple symbols"""
     portfolio_data = []
-    weighted_risk = 0
+    total_risk = 0
+    high_risk_assets = 0
+    
     for symbol in symbols:
         try:
-            market = fetch_market_data(symbol)
-            if "error" not in market:
-                signals = detect_crisis_signals(market)
-                risk = calculate_risk_score(signals['signal_count'])
-                weighted_risk += risk['risk_score']
+            market_data = fetch_market_data(symbol.strip())
+            if "error" not in market_data:
+                signals = detect_crisis_signals(market_data)
+                risk = calculate_risk_score(signals.get("signal_count", 0))
+                
                 portfolio_data.append({
-                    'symbol': symbol,
-                    'risk_score': risk['risk_score'],
-                    'risk_level': risk['risk_level'],
-                    'price': market['current_price'],
-                    'volatility': market['volatility_percent']
+                    "symbol": symbol,
+                    "price": market_data['current_price'],
+                    "volatility": market_data['volatility_percent'],
+                    "risk_score": risk['risk_score'],
+                    "classification": risk['classification']
                 })
+                
+                total_risk += risk['risk_score']
+                if risk['risk_score'] > 50:
+                    high_risk_assets += 1
         except:
             pass
-    portfolio_risk = int(weighted_risk / len(symbols)) if symbols else 0
-    if portfolio_risk > 70:
-        rec = " CRITICAL: Review immediately"
-    elif portfolio_risk > 50:
-        rec = " HIGH: Consider rebalancing"
-    elif portfolio_risk > 30:
-        rec = " MODERATE: Monitor closely"
+
+  if len(portfolio_data) == 0:
+        return {"error": "No valid symbols in portfolio"}
+    
+    avg_portfolio_risk = total_risk / len(portfolio_data)
+    
+    if avg_portfolio_risk < 30:
+        portfolio_rec = "Monitor"
+    elif avg_portfolio_risk < 50:
+        portfolio_rec = "Review"
     else:
-        rec = " STABLE: Continue monitoring"
-    return {'portfolio_risk': portfolio_risk, 'stocks': portfolio_data, 'recommendation': rec}
+        portfolio_rec = "Rebalance"
+    
+    return {
+        "portfolio_data": portfolio_data,
+        "portfolio_risk": round(avg_portfolio_risk, 2),
+        "high_risk_assets": high_risk_assets,
+        "recommendation": portfolio_rec
+    }
 
-# ===== UI =====
-st.markdown("<h1 style='text-align:center;color:#FF4B4B'> Financial Crisis Detection</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center'>Multi-Agent AI for Real-Time Market Analysis</p>", unsafe_allow_html=True)
+#streamlit ui
+st.markdown("""
+    <style>
+    .main { max-width: 1200px; }
+    .stMetric { background-color: #f0f2f6; padding: 10px; border-radius: 8px; }
+    </style>
+    """, unsafe_allow_html=True)
 
-mode = st.sidebar.radio("Analysis Mode", ["Single Stock", "Portfolio Analysis", "Dashboard"])
+st.title("🚨 Financial Crisis Detection Agent")
+st.markdown("*Real-Time Market Analysis & Risk Assessment*")
+st.divider()
 
+# Sidebar
+with st.sidebar:
+    st.header("⚙️ Analysis Mode")
+    mode = st.radio(
+        "Select Analysis Mode:",
+        ["Single Stock", "Portfolio Analysis", "Dashboard"]
+    )
+    #single stock analyis
 if mode == "Single Stock":
-    st.header(" Single Stock Analysis")
-    col1, col2 = st.columns([3, 1])
+    st.header("📊 Single Stock Analysis")
+    
+    col1, col2 = st.columns(2)
     with col1:
-        symbol = st.text_input("Stock Symbol", "AAPL").upper()
+        symbol = st.text_input("Enter Stock Symbol", value="AAPL", placeholder="e.g., AAPL, TCS.NS")
     with col2:
-        st.write(""); st.write("")
-        btn = st.button(" Analyze", use_container_width=True)
+        st.write("")
+        st.write("")
+        analyze_btn = st.button("🔍 Analyze", use_container_width=True, type="primary")
     
-    if btn and symbol:
-        with st.spinner(f"Analyzing {symbol}..."):
-            market = fetch_market_data(symbol)
-            if "error" not in market:
-                signals = detect_crisis_signals(market)
-                risk = calculate_risk_score(signals['signal_count'])
-                st.success(f"✓ Analysis complete")
-                
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Price", f"${market['current_price']}", f"{market['price_change_percent']:+.1f}%")
-                c2.metric("Volatility", f"{market['volatility_percent']:.1f}%")
-                emoji = "🔴" if risk['risk_score'] > 70 else "🟠" if risk['risk_score'] > 50 else "🟡" if risk['risk_score'] > 30 else "🟢"
-                c3.metric("Risk", f"{emoji} {risk['risk_score']}/100")
-                c4.metric("Signals", signals['signal_count'])
-                
-                with st.expander("📋 Details"):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("**Signals:**")
-                        for s in signals['detected_signals'] or ["✅ None"]:
-                            st.markdown(f"- {s}")
-                    with col2:
-                        st.markdown(f"**Level:** {risk['risk_level']}")
-                        st.markdown(f"**Action:** {risk['recommendation']}")
+    if analyze_btn and symbol:
+        with st.spinner(f"Fetching data for {symbol}..."):
+            market_data = fetch_market_data(symbol)
+            
+            if "error" in market_data:
+                st.error(f"Error: {market_data['error']}")
             else:
-                st.error("Error fetching data")
-
-elif mode == "Portfolio Analysis":
+                # Display metrics
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Current Price", f"${market_data['current_price']}")
+                with col2:
+                    st.metric("30-Day Change", f"{market_data['price_change_percent']:.2f}%")
+                with col3:
+                    st.metric("Volatility", f"{market_data['volatility_percent']:.2f}%")
+                with col4:
+                    st.metric("Volume", f"{market_data['volume']:,}")
+                
+                st.divider()
+                
+                # Crisis signals
+                signals = detect_crisis_signals(market_data)
+                risk = calculate_risk_score(signals["signal_count"])
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("🚨 Crisis Signals")
+                    if signals["signals"]:
+                        for signal in signals["signals"]:
+                            st.write(signal)
+                    else:
+                        st.success("✅ No crisis signals detected")
+                
+                with col2:
+                    st.subheader("📈 Risk Assessment")
+                    st.metric("Risk Score", f"{risk['risk_score']}/100")
+                    st.metric("Classification", risk['classification'])
+                    st.write(f"**Recommendation:** {risk['recommendation']}")
+    #portfolio analysis
+            
+            elif mode == "Portfolio Analysis":
     st.header("💼 Portfolio Analysis")
-    symbols_input = st.text_area("Symbols (comma-separated)", "AAPL, SPY, MSFT")
     
-    if st.button("📈 Analyze Portfolio", use_container_width=True):
-        symbols = [s.strip().upper() for s in symbols_input.split(",") if s.strip()]
-        with st.spinner("Analyzing..."):
+    symbols_input = st.text_input(
+        "Enter Stock Symbols (comma-separated)",
+        value="AAPL,SPY,MSFT",
+        placeholder="e.g., AAPL,TCS.NS,BTC-USD"
+    )
+    
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        analyze_btn = st.button("📊 Analyze Portfolio", use_container_width=True, type="primary")
+    
+    if analyze_btn and symbols_input:
+        symbols = [s.strip() for s in symbols_input.split(",")]
+        
+        with st.spinner(f"Analyzing {len(symbols)} symbols..."):
             portfolio = analyze_portfolio(symbols)
-            st.success("✓ Complete")
             
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Stocks", len(portfolio['stocks']))
-            emoji = "🔴" if portfolio['portfolio_risk'] > 70 else "🟠" if portfolio['portfolio_risk'] > 50 else "🟡" if portfolio['portfolio_risk'] > 30 else "🟢"
-            c2.metric("Portfolio Risk", f"{emoji} {portfolio['portfolio_risk']}/100")
-            c3.metric("High Risk", sum(s.get('risk_score', 0) > 50 for s in portfolio['stocks']))
-            
-            if portfolio['stocks']:
-                df = pd.DataFrame(portfolio['stocks'])
-                df['Price'] = df['price'].apply(lambda x: f"${x:.2f}")
-                df['Vol'] = df['volatility'].apply(lambda x: f"{x:.1f}%")
-                df['Risk'] = df['risk_score'].apply(lambda x: f"{x}/100")
-                st.dataframe(df[['symbol', 'Price', 'Vol', 'Risk', 'risk_level']], use_container_width=True, hide_index=True)
-            
-            st.subheader("💡 Recommendation")
-            if portfolio['portfolio_risk'] > 70:
-                st.error(portfolio['recommendation'])
-            elif portfolio['portfolio_risk'] > 50:
-                st.warning(portfolio['recommendation'])
+            if "error" in portfolio:
+                st.error(f"Error: {portfolio['error']}")
             else:
-                st.info(portfolio['recommendation'])
+                # Portfolio summary
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Portfolio Risk", f"{portfolio['portfolio_risk']}/100")
+                with col2:
+                    st.metric("High-Risk Assets", portfolio['high_risk_assets'])
+                with col3:
+                    st.metric("Recommendation", portfolio['recommendation'])
+                
+                st.divider()
+                
+                # Portfolio table
+                st.subheader("📋 Asset Breakdown")
+                df = pd.DataFrame(portfolio['portfolio_data'])
+                st.dataframe(df, use_container_width=True)
+#dashboard
 
 else:
-    st.header("📊 Risk Dashboard")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Market Risk", "42/100", "-5")
-    c2.metric("Portfolio Risk", "38/100", "-8")
-    c3.metric("Alerts", "3")
-    c4.metric("Crisis Prob", "15%", "-3%")
+    st.header("📊 Dashboard")
+    st.info("Select specific symbols in Single Stock or Portfolio mode to see detailed analysis.")
     
-    st.subheader(" Active Alerts")
-    alerts = pd.DataFrame({
-        'Symbol': ['AAPL', 'BTC-USD', 'TSLA'],
-        'Level': [' HIGH', ' CRITICAL', ' MODERATE'],
-        'Risk': [72, 85, 45],
-        'Action': ['Review', 'Immediate', 'Monitor']
-    })
-    st.dataframe(alerts, use_container_width=True, hide_index=True)
+    # Featured symbols
+    st.subheader("⭐ Featured Symbols")
+    featured = ["AAPL", "SPY", "BTC-USD"]
+    
+    cols = st.columns(3)
+    for idx, symbol in enumerate(featured):
+        with cols[idx]:
+            try:
+                market_data = fetch_market_data(symbol)
+                if "error" not in market_data:
+                    signals = detect_crisis_signals(market_data)
+                    risk = calculate_risk_score(signals["signal_count"])
+                    
+                    st.metric(
+                        symbol,
+                        f"${market_data['current_price']}",
+                        f"{market_data['price_change_percent']:.1f}%"
+                    )
+                    st.write(f"Risk: {risk['classification']}")
+            except:
+                st.write(f"⚠️ {symbol} - Unable to fetch")
 
 st.divider()
-c1, c2, c3 = st.columns(3)
-c1.info("**🤖 Multi-Agent**\nCrisis Detector → Risk Scorer")
-c2.info("**📊 Real Data**\nYahoo Finance API")
-c3.info("**✓ Enterprise**\nAudit + Compliance")
+st.markdown("""
+    --- **Tech Stack:** Streamlit | yfinance | Pandas | Python  
+    **Data Source:** Yahoo Finance
+""")
 
-st.markdown("<p style='text-align:center;color:#666'>Built for Google AI Agents Intensive</p>", unsafe_allow_html=True)
