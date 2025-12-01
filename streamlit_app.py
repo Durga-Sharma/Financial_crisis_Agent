@@ -1,17 +1,11 @@
 import streamlit as st
-import sys
 import subprocess
-
-# Ensure yfinance is installed before import
-@st.cache_resource
-def install_yfinance():
-    try:
-        import yfinance
-    except ImportError:
-        st.warning("Installing yfinance... (this happens once)")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "yfinance"])
-
-install_yfinance()
+import sys
+try:
+    import yfinance as yf
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance"])
+    import yfinance as yf
 
 # Skipping complex imports for now
 st.set_page_config(page_title="Crisis Detection", page_icon="🚨", layout="wide")
@@ -22,7 +16,7 @@ st.write("App deployed successfully!")
 # Try imports
 try:
     import pandas as pd
-    import yfinance as yf
+    
     from datetime import datetime
     import io
     st.success("✓ All imports working!")
