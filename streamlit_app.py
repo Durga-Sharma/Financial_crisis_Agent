@@ -221,7 +221,7 @@ elif mode == "Portfolio Analysis":
                 with col1:
                     st.metric("Portfolio Risk", f"{portfolio['portfolio_risk']}/100")
                 with col2:
-                    st.metric("High-Risk Assets", portfolio['high_risk_assets']")
+                    st.metric("High-Risk Assets", portfolio['high_risk_assets'])
                 with col3:
                     st.metric("Recommendation", portfolio['recommendation'])
                 
